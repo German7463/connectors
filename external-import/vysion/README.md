@@ -1,4 +1,4 @@
-# External Ingestion Template Connector
+# OPENCTI Vysion Connector - External import
 
 <!--
 General description of the connector

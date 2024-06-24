@@ -2,13 +2,13 @@
 import sys
 import time
 
-from stix2 import Indicator, Bundle, ThreatActor, Relationship, Incident, Identity
+from stix2 import Bundle, ThreatActor, Relationship, Incident, Identity
 from lib.external_import import ExternalImportConnector
 import os
 import yaml
 import urllib
 import json
-from pycti import OpenCTIConnectorHelper, OpenCTIApiClient
+from pycti import OpenCTIConnectorHelper, get_config_variable
 
 
 class VysionEI(ExternalImportConnector):
@@ -21,33 +21,39 @@ class VysionEI(ExternalImportConnector):
             if os.path.isfile(config_file_path)
             else {}
         )
-        #print(config)
         self.helper = OpenCTIConnectorHelper(config)
-        self.opencti_url = config['opencti']['url']
-        self.opencti_token = config['opencti']['token']
-        self.vysion_api_url = config['vysion']['api_url']
-        self.vysion_api_key = config['vysion']['api_key']
-        #print(self.vysion_api_key)
-        '''
+
+        self.opencti_url = get_config_variable(
+            "OPENCTI_URL", ["opencti", "url"], config
+        )
+        self.opencti_token = get_config_variable(
+            "OPENCTI_TOKEN", ["opencti", "token"], config
+        )
+
         self.vysion_api_url = get_config_variable(
-            "VYSION_API_URL", ["VysionEI", "vysion_api_url"], config
+            "VYSION_API_URL", ["vysion", "api_url"], config
         )
         self.vysion_api_key = get_config_variable(
-            "VYSION_API_KEY", ["VysionEI", "vysion_api_key"], config
+            "VYSION_API_KEY", ["vysion", "api_key"], config
         )
-        '''
 
-    
+        print(f"OpenCTI URL: {self.opencti_url}")
+        print(f"OpenCTI Token: {self.opencti_token}")
+        print(f"Vysion API URL: {self.vysion_api_url}")
+        print(f"Vysion API Key: {self.vysion_api_key}")
+        
+
     def get_interval(self) -> int:
         return int(self.template_interval) * 60 * 60 * 24
 
-
     def call_vysion_api_feed(self):
 
-        request = urllib.request.Request(self.vysion_api_url + "/api/v1/feed/ransomware")
-        request.add_header('Accept', 'application/json')
-        request.add_header('x-api-key', self.vysion_api_key)
-        request.add_header('User-Agent', "Mozilla/5.0")
+        request = urllib.request.Request(
+            self.vysion_api_url + "/api/v1/feed/ransomware"
+        )
+        request.add_header("Accept", "application/json")
+        request.add_header("x-api-key", self.vysion_api_key)
+        request.add_header("User-Agent", "Mozilla/5.0")
 
         try:
             response = urllib.request.urlopen(request)
@@ -57,53 +63,42 @@ class VysionEI(ExternalImportConnector):
         except Exception as e:
             self.helper.log_error(f"Error while calling Vysion API: {e}")
             return None
-        
-    def create_api_client(self):
-        api_client = OpenCTIApiClient(
-            url=self.opencti_url,
-            token=self.opencti_token,
-        )
 
-        return api_client
-
-        
     def get_feed_vysion(self):
 
         data = self.call_vysion_api_feed()
-        number_data = data["data"]["total"]
-        
+
         events = []
 
-        print("data: " + str(data))
-
         for event in data["data"]["hits"]:
-            company = event.get("company","")
-            company_link = event.get("company_link","")
-            link_post = event.get("link_post","")
-            ransomware_group = event.get("group","")
-            date = event.get("date","")
-            info = event.get("info","")
-            victim_country = event.get("country","")
-            
-            events.append({
-                "company": company,
-                "company_link": company_link,
-                "link_post": link_post,
-                "ransomware_group": ransomware_group,
-                "date": date,
-                "info": info,
-                "victim_country": victim_country
-            })
+            company = event.get("company", "")
+            company_link = event.get("company_link", "")
+            link_post = event.get("link_post", "")
+            ransomware_group = event.get("group", "")
+            date = event.get("date", "")
+            info = event.get("info", "")
+            victim_country = event.get("country", "")
+
+            events.append(
+                {
+                    "company": company,
+                    "company_link": company_link,
+                    "link_post": link_post,
+                    "ransomware_group": ransomware_group,
+                    "date": date,
+                    "info": info,
+                    "victim_country": victim_country,
+                }
+            )
 
         return events
-    
+
     def process_event(self, event):
 
         try:
 
             threat_actor = ThreatActor(
-                name=event["ransomware_group"],
-                labels=["ransomware"]
+                name=event["ransomware_group"], labels=["ransomware"]
             )
 
             victim = Identity(
@@ -113,28 +108,35 @@ class VysionEI(ExternalImportConnector):
             )
 
             incident = Incident(
-                name="Vysion Feed: " + event["ransomware_group"] + " Attack" + " - " + event["company"],
+                name="Vysion Feed: "
+                + event["ransomware_group"]
+                + " Attack"
+                + " - "
+                + event["company"],
                 description=event["info"],
                 labels=["ransomware"],
                 external_references=[
                     {
-                        "source_name": "Vysion - Ransomware Feed: " + event["ransomware_group"] + " Attack",
+                        "source_name": "Vysion - Ransomware Feed: "
+                        + event["ransomware_group"]
+                        + " Attack",
                         "url": event["link_post"],
-                        #"ransomware_group": event["ransomware_group"]
                     }
-                ]
+                ],
             )
 
             relation = Relationship(
                 source_ref=incident.id,
                 target_ref=threat_actor.id,
-                relationship_type="attributed-to"
+                relationship_type="attributed-to",
+                description="Attribution of the incident to the threat actor",
             )
 
             relation2 = Relationship(
                 source_ref=incident.id,
                 target_ref=victim.id,
-                relationship_type="targets"
+                relationship_type="targets",
+                description="Victim of the incident",
             )
 
             # Crea un Bundle con los objetos STIX
@@ -142,7 +144,7 @@ class VysionEI(ExternalImportConnector):
 
             # Envia el Bundle a OpenCTI
             self.helper.send_stix2_bundle(bundle.serialize())
-         
+
         except Exception as e:
             self.helper.log_error(f"Error while processing event: {e}")
 
@@ -151,13 +153,12 @@ class VysionEI(ExternalImportConnector):
         self.helper.log_info(f"{self.helper.connect_name} connector is running...")
 
         try:
+
             events = self.get_feed_vysion()
-            
-            print("EVENTOS: " + str(events))
             for event in events:
                 self.helper.log_info(f"Event: {event}")
                 self.process_event(event)
-                print("OK")
+
         except Exception as e:
             self.helper.log_error(f"Error while running the connector: {e}")
 
@@ -165,8 +166,8 @@ class VysionEI(ExternalImportConnector):
 
 
 if __name__ == "__main__":
+    
     try:
-
         connector = VysionEI()
         print("Connector created")
         connector.run()
