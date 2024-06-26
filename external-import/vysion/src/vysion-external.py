@@ -36,11 +36,6 @@ class VysionEI(ExternalImportConnector):
         self.vysion_api_key = get_config_variable(
             "VYSION_API_KEY", ["vysion", "api_key"], config
         )
-
-        print(f"OpenCTI URL: {self.opencti_url}")
-        print(f"OpenCTI Token: {self.opencti_token}")
-        print(f"Vysion API URL: {self.vysion_api_url}")
-        print(f"Vysion API Key: {self.vysion_api_key}")
         
 
     def get_interval(self) -> int:
